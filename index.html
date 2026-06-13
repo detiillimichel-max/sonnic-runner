@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sonic Runner - Pocket Edition</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body {
+            background-color: #0d0e15;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100%;
+            max-width: 450px;
+            height: 100%;
+            max-height: 850px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+            background: linear-gradient(to bottom, #1a0b2e, #0b061a);
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* HUD - Glassmorphism Premium */
+        .hud-panel {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            right: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 20px;
+            background: rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .hud-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 18px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .hud-item.rings .icon {
+            width: 20px;
+            height: 20px;
+            background: #ffd700;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #ffea70, inset 0 0 4px #b39700;
+        }
+
+        .hud-item.score {
+            font-family: monospace;
+            color: #00ffcc;
+        }
+
+        /* Telas de Transição */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(10, 6, 26, 0.8);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 20;
+            transition: opacity 0.3s ease;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        h1 {
+            color: #ffffff;
+            font-size: 32px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            background: linear-gradient(45deg, #00ffcc, #0077ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p {
+            color: #a0a5c0;
+            font-size: 16px;
+            margin-bottom: 30px;
+        }
+
+        .btn-play {
+            padding: 16px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            color: #ffffff;
+            background: linear-gradient(135deg, #0077ff, #0055cc);
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 8px 20px rgba(0, 85, 204, 0.4);
+            transform: translateY(0);
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+
+        .btn-play:active {
+            transform: translateY(2px);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div class="hud-panel">
+            <div class="hud-item rings">
+                <div class="icon"></div>
+                <span id="ring-count">0</span>
+            </div>
+            <div class="hud-item score">
+                <span id="score-count">00000</span>
+            </div>
+        </div>
+
+        <div id="start-screen" class="overlay">
+            <h1>Sonic Dash</h1>
+            <p>Deslize para os lados para mudar de pista. Colete as argolas e evite os espinhos!</p>
+            <button class="btn-play" onclick="startGame()">JOGAR</button>
+        </div>
+
+        <div id="gameover-screen" class="overlay hidden">
+            <h1 style="background: linear-gradient(45deg, #ff3366, #ff0033); -webkit-background-clip: text;">Fim de Jogo</h1>
+            <p id="final-stats">Pontos: 0 | Argolas: 0</p>
+            <button class="btn-play" style="background: linear-gradient(135deg, #ff3366, #cc0033); box-shadow: 0 8px 20px rgba(204, 0, 51, 0.4);" onclick="resetGame()">TENTAR DE NOVO</button>
+        </div>
+
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        let gameActive = false;
+        let score = 0;
+        let rings = 0;
+        let speed = 5;
+        const maxSpeed = 15;
+        
+        let currentLane = 1; 
+        const totalLanes = 3;
+
+        const player = {
+            targetX: 0,
+            x: 0,
+            y: 0,
+            radius: 22,
+            animFrame: 0
+        };
+
+        let entities = [];
+        let particles = [];
+        let lastSpawnTime = 0;
+        const spawnInterval = 1200;
+
+        let touchStartX = 0;
+        let touchStartY = 0;
+
+        const container = document.getElementById('game-container');
+        container.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }, { passive: true });
+
+        container.addEventListener('touchend', (e) => {
+            const touchEndX = e.changedTouches[0].clientX;
+            const touchEndY = e.changedTouches[0].clientY;
+            
+            const diffX = touchEndX - touchStartX;
+            const diffY = touchEndY - touchStartY;
+
+            if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 40) {
+                if (diffX > 0 && currentLane < totalLanes - 1) {
+                    currentLane++;
+                } else if (diffX < 0 && currentLane > 0) {
+                    currentLane--;
+                }
+            }
+        }, { passive: true });
+
+        function startGame() {
+            document.getElementById('start-screen').classList.add('hidden');
+            gameActive = true;
+            lastSpawnTime = performance.now();
+            animate();
+        }
+
+        function gameOver() {
+            gameActive = false;
+            document.getElementById('final-stats').innerText = `Pontos: ${Math.floor(score)} | Argolas: ${rings}`;
+            document.getElementById('gameover-screen').classList.remove('hidden');
+        }
+
+        function resetGame() {
+            document.getElementById('gameover-screen').classList.add('hidden');
+            score = 0;
+            rings = 0;
+            speed = 5;
+            currentLane = 1;
+            entities = [];
+            particles = [];
+            document.getElementById('ring-count').innerText = rings;
+            gameActive = true;
+            lastSpawnTime = performance.now();
+        }
+
+        function createExplosion(x, y, color) {
+            for (let i = 0; i < 8; i++) {
+                particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 6,
+                    vy: (Math.random() - 0.5) * 6,
+                    radius: Math.random() * 3 + 2,
+                    alpha: 1,
+                    color: color
+                });
+            }
+        }
+
+        function spawnEntity() {
+            const lane = Math.floor(Math.random() * totalLanes);
+            const type = Math.random() < 0.6 ? 'ring' : 'obstacle';
+            entities.push({
+                lane: lane,
+                y: -50,
+                type: type,
+                width: type === 'ring' ? 20 : 35,
+                height: type === 'ring' ? 20 : 35,
+                pulse: 0
+            });
+        }
+
+        function drawEnvironment() {
+            const laneWidth = canvas.width / totalLanes;
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.lineWidth = 2;
+            for (let i = 1; i < totalLanes; i++) {
+                ctx.beginPath();
+                ctx.moveTo(i * laneWidth, 0);
+                ctx.lineTo(i * laneWidth, canvas.height);
+                ctx.stroke();
+            }
+
+            ctx.fillStyle = 'rgba(0, 119, 255, 0.15)';
+            const stripHeight = 100;
+            const offset = (performance.now() * (speed / 5)) % stripHeight;
+            for (let y = -stripHeight; y < canvas.height; y += stripHeight) {
+                ctx.fillRect(0, y + offset, 4, stripHeight / 2);
+                ctx.fillRect(canvas.width - 4, y + offset, 4, stripHeight / 2);
+            }
+        }
+
+        function animate() {
+            if (!gameActive) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawEnvironment();
+
+            score += 0.15 * (speed / 5);
+            document.getElementById('score-count').innerText = String(Math.floor(score)).padStart(5, '0');
+            if (speed < maxSpeed) speed += 0.001;
+
+            const laneWidth = canvas.width / totalLanes;
+            player.targetX = (currentLane * laneWidth) + (laneWidth / 2);
+            player.x += (player.targetX - player.x) * 0.25;
+            player.y = canvas.height - 120;
+
+            player.animFrame += 0.1;
+            const dynamicPulse = Math.sin(player.animFrame) * 2;
+
+            ctx.save();
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#0077ff';
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.beginPath();
+            ctx.ellipse(player.x, player.y + 25, player.radius - 5, 8, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            const grad = ctx.createRadialGradient(player.x - 5, player.y - 5, 2, player.x, player.y, player.radius);
+            grad.addColorStop(0, '#00d9ff');
+            grad.addColorStop(0.8, '#0055cc');
+            grad.addColorStop(1, '#002288');
+            ctx.fillStyle = grad;
+            
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.radius + dynamicPulse, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            const currentTime = performance.now();
+            if (currentTime - lastSpawnTime > spawnInterval - (speed * 30)) {
+                spawnEntity();
+                lastSpawnTime = currentTime;
+            }
+
+            for (let i = entities.length - 1; i >= 0; i--) {
+                const ent = entities[i];
+                ent.y += speed;
+                const entX = (ent.lane * laneWidth) + (laneWidth / 2);
+
+                if (ent.type === 'ring') {
+                    ent.pulse += 0.08;
+                    const widthFactor = Math.abs(Math.sin(ent.pulse));
+                    
+                    ctx.save();
+                    ctx.shadowBlur = 10;
+                    ctx.shadowColor = '#ffd700';
+                    ctx.strokeStyle = '#ffd700';
+                    ctx.lineWidth = 4;
+                    ctx.beginPath();
+                    ctx.ellipse(entX, ent.y, ent.width * widthFactor, ent.height, 0, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
+
+                    const dist = Math.hypot(player.x - entX, player.y - ent.y);
+                    if (dist < player.radius + ent.width / 2) {
+                        rings++;
+                        document.getElementById('ring-count').innerText = rings;
+                        createExplosion(entX, ent.y, '#ffd700');
+                        entities.splice(i, 1);
+                        continue;
+                    }
+
+                } else if (ent.type === 'obstacle') {
+                    ctx.save();
+                    ctx.shadowBlur = 8;
+                    ctx.shadowColor = '#ff3366';
+                    ctx.fillStyle = '#ff3366';
+                    ctx.beginPath();
+                    ctx.moveTo(entX, ent.y - ent.height / 2);
+                    ctx.lineTo(entX + ent.width / 2, ent.y + ent.height / 2);
+                    ctx.lineTo(entX - ent.width / 2, ent.y + ent.height / 2);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.restore();
+
+                    const dist = Math.hypot(player.x - entX, player.y - ent.y);
+                    if (dist < player.radius + ent.width / 3) {
+                        createExplosion(player.x, player.y, '#ff3366');
+                        gameOver();
+                    }
+                }
+
+                if (ent.y > canvas.height + 50) {
+                    entities.splice(i, 1);
+                }
+            }
+
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx; p.y += p.vy; p.alpha -= 0.03;
+                if (p.alpha <= 0) { particles.splice(i, 1); continue; }
+                ctx.save();
+                ctx.globalAlpha = p.alpha;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            requestAnimationFrame(animate);
+        }
+    </script>
+</body>
+  </html>
+
